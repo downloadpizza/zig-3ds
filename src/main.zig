@@ -18,6 +18,7 @@ export fn main(_: c_int, _: [*]const [*:0]const u8) void {
 
     while (c.aptMainLoop()) {
         c.scanKeys();
+        _ = c.printf("hello\n");
 
         const kDown: u32 = c.keysDown();
 

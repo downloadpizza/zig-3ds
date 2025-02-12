@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
     _ = map_file;
 
     elf.addFileArg(obj.getEmittedBin());
-    elf.addArgs(&[_][]const u8{
+    elf.addArgs(&.{
         "-L" ++ devkitpro ++ "/libctru/lib",
         "-L" ++ devkitpro ++ "/portlibs/3ds/lib",
     });
@@ -52,13 +52,17 @@ pub fn build(b: *std.Build) void {
     elf.addArg("-o");
     const elf_file = elf.addOutputFileArg("zig-3ds.elf");
 
-    _ = elf.captureStdOut();
-
     const dsx = b.addSystemCommand(&.{
         devkitpro ++ "/tools/bin/3dsxtool" ++ extension,
     });
     dsx.addFileArg(elf_file);
     const dsx_file = dsx.addOutputFileArg("zig-3ds.3dsx");
+
+    const install_dsx = b.addInstallFile(dsx_file, "zig-3ds.3dsx");
+    const install_elf = b.addInstallFile(elf_file, "zig-3ds.elf");
+
+    b.default_step.dependOn(&install_dsx.step);
+    b.default_step.dependOn(&install_elf.step);
 
     b.default_step.dependOn(&dsx.step);
     dsx.step.dependOn(&elf.step);
