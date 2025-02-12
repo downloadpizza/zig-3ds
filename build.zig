@@ -1,58 +1,79 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const emulator = "citra";
+const emulator = "/mnt/c/Program Files/Lime3DS/lime3ds.exe";
+const ds_ip = "192.168.1.60";
 const flags = .{"-lctru"};
 const devkitpro = "/opt/devkitpro";
 
-pub fn build(b: *std.build.Builder) void {
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) void {
+    b.libc_file = "libc.txt";
 
-    const obj = b.addObject("zig-3ds", "src/main.zig");
-    obj.setOutputDir("zig-out");
-    obj.linkLibC();
-    obj.setLibCFile(std.build.FileSource{ .path = "libc.txt" });
-    obj.addIncludeDir(devkitpro ++ "/libctru/include");
-    obj.addIncludeDir(devkitpro ++ "/portlibs/3ds/include");
-    obj.setTarget(.{
+    const target = b.standardTargetOptions(.{ .default_target = .{
         .cpu_arch = .arm,
         .os_tag = .freestanding,
         .abi = .eabihf,
         .cpu_model = .{ .explicit = &std.Target.arm.cpu.mpcore },
+    } });
+    const optimize = b.standardOptimizeOption(.{});
+
+    const mod = b.createModule(.{
+        .link_libc = true,
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
     });
-    obj.setBuildMode(mode);
+
+    mod.addIncludePath(.{ .cwd_relative = devkitpro ++ "/libctru/include" });
+    mod.addIncludePath(.{ .cwd_relative = devkitpro ++ "/portlibs/3ds/include" });
+    mod.addIncludePath(.{ .cwd_relative = devkitpro ++ "/devkitARM/arm-none-eabi/include" });
+
+    const obj = b.addObject(.{ .name = "zig-3ds", .root_module = mod });
 
     const extension = if (builtin.target.os.tag == .windows) ".exe" else "";
-    const elf = b.addSystemCommand(&(.{
-        devkitpro ++ "/devkitARM/bin/arm-none-eabi-gcc" ++ extension,
-        "-g",
-        "-march=armv6k",
-        "-mtune=mpcore",
-        "-mfloat-abi=hard",
-        "-mtp=soft",
-        "-Wl,-Map,zig-out/zig-3ds.map",
-        "-specs=" ++ devkitpro ++ "/devkitARM/arm-none-eabi/lib/3dsx.specs",
-        "zig-out/zig-3ds.o",
+    const elf = b.addSystemCommand(&(.{devkitpro ++ "/devkitARM/bin/arm-none-eabi-gcc" ++ extension}));
+
+    elf.addArg("-g");
+    elf.addArg("-march=armv6k");
+    elf.addArg("-mtune=mpcore");
+    elf.addArg("-mfloat-abi=hard");
+    elf.addArg("-mtp=soft");
+    const map_file = elf.addPrefixedOutputFileArg("-Wl,-Map,", "zig-3ds.map");
+    elf.addArg("-specs=" ++ devkitpro ++ "/devkitARM/arm-none-eabi/lib/3dsx.specs");
+
+    _ = map_file;
+
+    elf.addFileArg(obj.getEmittedBin());
+    elf.addArgs(&[_][]const u8{
         "-L" ++ devkitpro ++ "/libctru/lib",
         "-L" ++ devkitpro ++ "/portlibs/3ds/lib",
-    } ++ flags ++ .{
-        "-o",
-        "zig-out/zig-3ds.elf",
-    }));
+    });
+    elf.addArgs(&flags);
+    elf.addArg("-o");
+    const elf_file = elf.addOutputFileArg("zig-3ds.elf");
+
+    _ = elf.captureStdOut();
 
     const dsx = b.addSystemCommand(&.{
         devkitpro ++ "/tools/bin/3dsxtool" ++ extension,
-        "zig-out/zig-3ds.elf",
-        "zig-out/zig-3ds.3dsx",
     });
-    dsx.stdout_action = .ignore;
+    dsx.addFileArg(elf_file);
+    const dsx_file = dsx.addOutputFileArg("zig-3ds.3dsx");
 
     b.default_step.dependOn(&dsx.step);
     dsx.step.dependOn(&elf.step);
     elf.step.dependOn(&obj.step);
 
     const run_step = b.step("run", "Run in Citra");
-    const citra = b.addSystemCommand(&.{ emulator, "zig-out/zig-3ds.3dsx" });
+    const citra = b.addSystemCommand(&.{emulator});
+    citra.addFileArg(dsx_file);
+
     run_step.dependOn(&dsx.step);
     run_step.dependOn(&citra.step);
+
+    const send_step = b.step("send", "Send to 3DS");
+    const link = b.addSystemCommand(&.{ devkitpro ++ "/tools/bin/3dslink" ++ extension, "-a", ds_ip });
+    link.addFileArg(dsx_file);
+    send_step.dependOn(&dsx.step);
+    send_step.dependOn(&link.step);
 }
