@@ -1,10 +1,18 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const emulator = "/mnt/c/Program Files/Lime3DS/lime3ds.exe";
-const ds_ip = "192.168.1.60";
 const flags = .{"-lctru"};
-const devkitpro = "/opt/devkitpro";
+
+const Config = struct {
+    project_name: []const u8,
+    devkitpro_path: []const u8,
+    run_path: ?[]const u8 = null,
+    console_ip: ?[]const u8 = null,
+};
+
+const config: Config = @import("config.zon");
+const devkitpro = config.devkitpro_path;
+const project_name = config.project_name;
 
 pub fn build(b: *std.Build) void {
     b.libc_file = "libc.txt";
@@ -28,7 +36,7 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(.{ .cwd_relative = devkitpro ++ "/portlibs/3ds/include" });
     mod.addIncludePath(.{ .cwd_relative = devkitpro ++ "/devkitARM/arm-none-eabi/include" });
 
-    const obj = b.addObject(.{ .name = "zig-3ds", .root_module = mod });
+    const obj = b.addObject(.{ .name = project_name, .root_module = mod });
 
     const extension = if (builtin.target.os.tag == .windows) ".exe" else "";
     const elf = b.addSystemCommand(&(.{devkitpro ++ "/devkitARM/bin/arm-none-eabi-gcc" ++ extension}));
@@ -39,7 +47,7 @@ pub fn build(b: *std.Build) void {
     elf.addArg("-mfloat-abi=hard");
     elf.addArg("-mtp=soft");
     elf.addArg("-Wl,-z,noexecstack");
-    const map_file = elf.addPrefixedOutputFileArg("-Wl,-Map,", "zig-3ds.map");
+    const map_file = elf.addPrefixedOutputFileArg("-Wl,-Map,", project_name ++ ".map");
     elf.addArg("-specs=" ++ devkitpro ++ "/devkitARM/arm-none-eabi/lib/3dsx.specs");
 
     elf.addFileArg(obj.getEmittedBin());
@@ -49,17 +57,17 @@ pub fn build(b: *std.Build) void {
     });
     elf.addArgs(&flags);
     elf.addArg("-o");
-    const elf_file = elf.addOutputFileArg("zig-3ds.elf");
+    const elf_file = elf.addOutputFileArg(project_name ++ ".elf");
 
     const dsx = b.addSystemCommand(&.{
         devkitpro ++ "/tools/bin/3dsxtool" ++ extension,
     });
     dsx.addFileArg(elf_file);
-    const dsx_file = dsx.addOutputFileArg("zig-3ds.3dsx");
+    const dsx_file = dsx.addOutputFileArg(project_name ++ ".3dsx");
 
-    const install_dsx = b.addInstallFile(dsx_file, "zig-3ds.3dsx");
-    const install_map = b.addInstallFile(map_file, "zig-3ds.map");
-    const install_elf = b.addInstallFile(elf_file, "zig-3ds.elf");
+    const install_dsx = b.addInstallFile(dsx_file, project_name ++ ".3dsx");
+    const install_map = b.addInstallFile(map_file, project_name ++ ".map");
+    const install_elf = b.addInstallFile(elf_file, project_name ++ ".elf");
 
     b.default_step.dependOn(&install_dsx.step);
     b.default_step.dependOn(&install_map.step);
@@ -69,25 +77,33 @@ pub fn build(b: *std.Build) void {
     dsx.step.dependOn(&elf.step);
     elf.step.dependOn(&obj.step);
 
-    const run_step = b.step("run", "Run in Citra");
-    const citra = b.addSystemCommand(&.{emulator});
-    citra.addFileArg(dsx_file);
+    const run_step = b.step("run", "Run in Emulator of choice");
+    if (config.run_path) |run_path| {
+        const run_executable = b.addSystemCommand(&.{run_path});
+        run_executable.addFileArg(dsx_file);
 
-    run_step.dependOn(&dsx.step);
-    run_step.dependOn(&citra.step);
+        run_step.dependOn(&dsx.step);
+        run_step.dependOn(&run_executable.step);
+    } else {
+        run_step.fail("Need to set config property run_path to use this option", .{}) catch {};
+    }
 
     const send_step = b.step("send", "Send to 3DS");
-    const dslink = b.addSystemCommand(&.{ devkitpro ++ "/tools/bin/3dslink" ++ extension, "-a", ds_ip });
-    dslink.addFileArg(dsx_file);
-    send_step.dependOn(&dsx.step);
-    send_step.dependOn(&dslink.step);
-
     const remote_dbg = b.step("remotedbg", "Send to 3DS and connect GDB");
-    const gdb = b.addSystemCommand(&.{devkitpro ++ "/devkitARM/bin/arm-none-eabi-gdb"});
-    gdb.addFileArg(elf_file);
-    gdb.addArg("-ex");
-    gdb.addArg("target remote " ++ ds_ip ++ ":4003");
+    if (config.console_ip) |console_ip| {
+        const dslink = b.addSystemCommand(&.{ devkitpro ++ "/tools/bin/3dslink" ++ extension, "-a", console_ip });
+        dslink.addFileArg(dsx_file);
+        send_step.dependOn(&dsx.step);
+        send_step.dependOn(&dslink.step);
 
-    gdb.step.dependOn(&dslink.step);
-    remote_dbg.dependOn(&gdb.step);
+        const gdb = b.addSystemCommand(&.{devkitpro ++ "/devkitARM/bin/arm-none-eabi-gdb"});
+        gdb.addFileArg(elf_file);
+        gdb.addArg("-ex");
+        gdb.addArg("target remote " ++ console_ip ++ ":4003");
+
+        gdb.step.dependOn(&dslink.step);
+        remote_dbg.dependOn(&gdb.step);
+    } else {
+        send_step.fail("Need to set config property console_ip to use this option", .{}) catch {};
+    }
 }

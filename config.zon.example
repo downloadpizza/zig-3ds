@@ -1,0 +1,9 @@
+.{
+    // copy to config.zon if you want to change it, please do not change unless new config options arrive
+    .project_name = "my-3ds-app",
+    .devkitpro_path = "/opt/devkitpro",
+
+    // these two are optional, you can and should delete them if you dont use their steps
+    .run_path = "/opt/azahar/azahar",
+    .console_ip = "192.168.1.123",
+}
