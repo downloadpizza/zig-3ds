@@ -4,10 +4,7 @@ const c = @cImport({
 });
 
 const std = @import("std");
-
-fn isPressed(kDown: u32, keys: u32) bool {
-    return (kDown & keys) == keys;
-}
+const input = @import("input.zig");
 
 export fn main(_: c_int, _: [*]const [*:0]const u8) void {
     _ = c.aptInit();
@@ -17,12 +14,11 @@ export fn main(_: c_int, _: [*]const [*:0]const u8) void {
     _ = c.consoleInit(c.GFX_TOP, null);
 
     while (c.aptMainLoop()) {
-        c.scanKeys();
-        _ = c.printf("hello\n");
+        input.scan();
 
-        const kDown: u32 = c.keysDown();
+        _ = c.printf("hello %d %d : %d %d\n", input.circlepad.dx, input.circlepad.dy, input.touch.x, input.touch.y);
 
-        if (isPressed(kDown, c.KEY_START)) {
+        if (input.keys.pressed.anyOf(&[_]input.Key{ .START, .SELECT })) {
             break;
         }
 

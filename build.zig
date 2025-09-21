@@ -38,10 +38,9 @@ pub fn build(b: *std.Build) void {
     elf.addArg("-mtune=mpcore");
     elf.addArg("-mfloat-abi=hard");
     elf.addArg("-mtp=soft");
+    elf.addArg("-Wl,-z,noexecstack");
     const map_file = elf.addPrefixedOutputFileArg("-Wl,-Map,", "zig-3ds.map");
     elf.addArg("-specs=" ++ devkitpro ++ "/devkitARM/arm-none-eabi/lib/3dsx.specs");
-
-    _ = map_file;
 
     elf.addFileArg(obj.getEmittedBin());
     elf.addArgs(&.{
@@ -59,9 +58,11 @@ pub fn build(b: *std.Build) void {
     const dsx_file = dsx.addOutputFileArg("zig-3ds.3dsx");
 
     const install_dsx = b.addInstallFile(dsx_file, "zig-3ds.3dsx");
+    const install_map = b.addInstallFile(map_file, "zig-3ds.map");
     const install_elf = b.addInstallFile(elf_file, "zig-3ds.elf");
 
     b.default_step.dependOn(&install_dsx.step);
+    b.default_step.dependOn(&install_map.step);
     b.default_step.dependOn(&install_elf.step);
 
     b.default_step.dependOn(&dsx.step);
@@ -76,8 +77,17 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&citra.step);
 
     const send_step = b.step("send", "Send to 3DS");
-    const link = b.addSystemCommand(&.{ devkitpro ++ "/tools/bin/3dslink" ++ extension, "-a", ds_ip });
-    link.addFileArg(dsx_file);
+    const dslink = b.addSystemCommand(&.{ devkitpro ++ "/tools/bin/3dslink" ++ extension, "-a", ds_ip });
+    dslink.addFileArg(dsx_file);
     send_step.dependOn(&dsx.step);
-    send_step.dependOn(&link.step);
+    send_step.dependOn(&dslink.step);
+
+    const remote_dbg = b.step("remotedbg", "Send to 3DS and connect GDB");
+    const gdb = b.addSystemCommand(&.{devkitpro ++ "/devkitARM/bin/arm-none-eabi-gdb"});
+    gdb.addFileArg(elf_file);
+    gdb.addArg("-ex");
+    gdb.addArg("target remote " ++ ds_ip ++ ":4003");
+
+    gdb.step.dependOn(&dslink.step);
+    remote_dbg.dependOn(&gdb.step);
 }
